@@ -1,0 +1,202 @@
+name: Trading Algo AVS Frontend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        description: 'Select environment (development, staging, production)'
+        required: true
+        default: 'development'
+        options:
+          - development
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC authentication
+
+jobs:
+  deploy-portal-printify-dev:
+    if: (github.event.inputs.environment == 'development') || (github.event_name == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Authenticate to Google Cloud using Workload Identity Federation
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_IDENTIFIER_DEV }}
+          service_account: ${{ vars.GCP_OIDC_SERVICE_ACCOUNT_DEV }}
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Authenticate Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ vars.GCP_LOCATION }}-docker.pkg.dev
+      - name: Build Docker image
+        env:
+          SHOPIFY_API_KEY: ${{ vars.SHOPIFY_API_KEY_DEV }}
+          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY_DEV }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN_DEV }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID_DEV }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET_DEV }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.FIREBASE_MESSAGING_SENDER_ID_DEV }}
+          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID_DEV }}
+        run: |
+          docker build \
+            -t ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-dev:${{ github.sha }} .
+      - name: Push Docker image to Artifact Registry
+        run: |
+          docker push ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-dev:${{ github.sha }}
+      - name: Deploy to Cloud Run
+        env:
+          SHOPIFY_API_KEY: ${{ vars.SHOPIFY_API_KEY_DEV }}
+          SHOPIFY_API_SECRET: ${{ vars.SHOPIFY_API_SECRET_DEV }}
+          SCOPES: ${{ vars.SHOPIFY_APP_SCOPES_DEV }} # need to format as write_products|read_products|...
+          SHOPIFY_APP_URL: ${{ vars.SHOPIFY_APP_URL_DEV }}
+          PROJECT_CODE: ${{ vars.PROJECT_CODE }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ vars.FIREBASE_SERVICE_ACCOUNT_KEY_DEV }}
+          PORTAL_PRINTS_BACKEND_API_URL: ${{ vars.PORTAL_PRINTIFY_API_URL_DEV}}
+        run: |
+          gcloud run deploy ${{ vars.PROJECT_CODE }}-dev-service --verbosity=none \
+            --image ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-dev:${{ github.sha }} \
+            --platform managed \
+            --region ${{ vars.GCP_LOCATION }} \
+            --allow-unauthenticated \
+            --project ${{ vars.GCP_PROJECT_ID }} \
+            --set-env-vars SHOPIFY_API_KEY="$SHOPIFY_API_KEY"
+            
+
+  deploy-portal-printify-staging:
+    if: (github.event_name == 'workflow_dispatch') && (github.event.inputs.environment == 'staging')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Authenticate to Google Cloud using Workload Identity Federation
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_IDENTIFIER_STAGING }}
+          service_account: ${{ vars.GCP_OIDC_SERVICE_ACCOUNT_STAGING }}
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Authenticate Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ vars.GCP_LOCATION }}-docker.pkg.dev
+      - name: Build Docker image
+        env:
+          SHOPIFY_API_KEY: ${{ secrets.SHOPIFY_API_KEY_STAGING }}
+          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY_DEV }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN_DEV }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID_DEV }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET_DEV }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.FIREBASE_MESSAGING_SENDER_ID_DEV }}
+          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID_DEV }}
+        run: |
+          docker build \
+            --build-arg SHOPIFY_CONFIG_NAME="shopify.app.portal-printify-staging.toml" \
+            --build-arg SHOPIFY_API_KEY=$SHOPIFY_API_KEY \
+            --build-arg VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+            --build-arg VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+            --build-arg VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
+            --build-arg VITE_FIREBASE_STORAGE_BUCKET=$VITE_FIREBASE_STORAGE_BUCKET \
+            --build-arg VITE_FIREBASE_MESSAGING_SENDER_ID=$VITE_FIREBASE_MESSAGING_SENDER_ID \
+            --build-arg VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID \
+            -t ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-staging:${{ github.sha }} .
+      - name: Push Docker image to Artifact Registry
+        run: |
+          docker push ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-staging:${{ github.sha }}
+      - name: Deploy to Cloud Run
+        env:
+          SHOPIFY_API_KEY: ${{ secrets.SHOPIFY_API_KEY_STAGING }}
+          SHOPIFY_API_SECRET: ${{ secrets.SHOPIFY_API_SECRET_STAGING }}
+          SCOPES: ${{ vars.SHOPIFY_APP_SCOPES_STAGING }} # need to format as write_products|read_products|... with --set-env-vars SCOPES="^|^$SCOPES" \
+          SHOPIFY_APP_URL: ${{ vars.SHOPIFY_APP_URL_STAGING }}
+          PROJECT_CODE: ${{ vars.PROJECT_CODE }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ vars.FIREBASE_SERVICE_ACCOUNT_KEY_DEV }}
+          PORTAL_PRINTS_BACKEND_API_URL: ${{ vars.PORTAL_PRINTIFY_API_URL_DEV}}
+        run: |
+          gcloud run deploy ${{ vars.PROJECT_CODE }}-staging-service --verbosity=none \
+            --image ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-staging:${{ github.sha }} \
+            --platform managed \
+            --region ${{ vars.GCP_LOCATION }} \
+            --allow-unauthenticated \
+            --project ${{ vars.GCP_PROJECT_ID }} \
+            --set-env-vars SHOPIFY_API_KEY="$SHOPIFY_API_KEY" \
+            --set-env-vars SHOPIFY_API_SECRET="$SHOPIFY_API_SECRET" \
+            --set-env-vars HOST="$SHOPIFY_APP_URL" \
+            --set-env-vars FIREBASE_SERVICE_ACCOUNT_KEY="$FIREBASE_SERVICE_ACCOUNT_KEY" \
+            --set-env-vars PORTAL_PRINTS_BACKEND_API_URL="$PORTAL_PRINTS_BACKEND_API_URL" \
+            --set-env-vars PROJECT_CODE="$PROJECT_CODE"
+
+  deploy-portal-printify-prod:
+    if: (github.event_name == 'workflow_dispatch') && (github.event.inputs.environment == 'production')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Authenticate to Google Cloud using Workload Identity Federation
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER_IDENTIFIER_PROD }}
+          service_account: ${{ vars.GCP_OIDC_SERVICE_ACCOUNT_PROD }}
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Authenticate Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ vars.GCP_LOCATION }}-docker.pkg.dev
+      - name: Build Docker image
+        env:
+          SHOPIFY_API_KEY: ${{ secrets.SHOPIFY_API_KEY_PROD }}
+          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY_DEV }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN_DEV }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID_DEV }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET_DEV }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.FIREBASE_MESSAGING_SENDER_ID_DEV }}
+          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID_DEV }}
+        run: |
+          docker build \
+            --build-arg SHOPIFY_CONFIG_NAME="shopify.app.portal-prints.toml" \
+            --build-arg SHOPIFY_API_KEY=$SHOPIFY_API_KEY \
+            --build-arg VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+            --build-arg VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+            --build-arg VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
+            --build-arg VITE_FIREBASE_STORAGE_BUCKET=$VITE_FIREBASE_STORAGE_BUCKET \
+            --build-arg VITE_FIREBASE_MESSAGING_SENDER_ID=$VITE_FIREBASE_MESSAGING_SENDER_ID \
+            --build-arg VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID \
+            -t ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-prod:${{ github.sha }} .
+      - name: Push Docker image to Artifact Registry
+        run: |
+          docker push ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-prod:${{ github.sha }}
+      - name: Deploy to Cloud Run
+        env:
+          SHOPIFY_API_KEY: ${{ secrets.SHOPIFY_API_KEY_PROD }}
+          SHOPIFY_API_SECRET: ${{ secrets.SHOPIFY_API_SECRET_PROD }}
+          SCOPES: ${{ vars.SHOPIFY_APP_SCOPES_PROD }} # need to format as write_products|read_products|... with --set-env-vars SCOPES="^|^$SCOPES" \
+          SHOPIFY_APP_URL: ${{ vars.SHOPIFY_APP_URL_PROD }}
+          PROJECT_CODE: ${{ vars.PROJECT_CODE }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ vars.FIREBASE_SERVICE_ACCOUNT_KEY_DEV }}
+          PORTAL_PRINTS_BACKEND_API_URL: ${{ vars.PORTAL_PRINTIFY_API_URL_DEV }}
+        run: |
+          gcloud run deploy ${{ vars.PROJECT_CODE }}-prod-service --verbosity=none \
+            --image ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-prod:${{ github.sha }} \
+            --platform managed \
+            --region ${{ vars.GCP_LOCATION }} \
+            --allow-unauthenticated \
+            --project ${{ vars.GCP_PROJECT_ID }} \
+            --set-env-vars SHOPIFY_API_KEY="$SHOPIFY_API_KEY" \
+            --set-env-vars SHOPIFY_API_SECRET="$SHOPIFY_API_SECRET" \
+            --set-env-vars HOST="$SHOPIFY_APP_URL" \
+            --set-env-vars FIREBASE_SERVICE_ACCOUNT_KEY="$FIREBASE_SERVICE_ACCOUNT_KEY" \
+            --set-env-vars PORTAL_PRINTS_BACKEND_API_URL="$PORTAL_PRINTS_BACKEND_API_URL" \
+            --set-env-vars PROJECT_CODE="$PROJECT_CODE"
