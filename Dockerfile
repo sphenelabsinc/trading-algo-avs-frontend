@@ -8,10 +8,6 @@ RUN npm install
 
 COPY . .
 
-RUN cd blockchain
-RUN npm install
-RUN cd ..
-
 RUN npm run build
 
 
