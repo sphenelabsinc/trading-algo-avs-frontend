@@ -64,6 +64,10 @@ jobs:
           PROJECT_CODE: ${{ vars.PROJECT_CODE }}
           FIREBASE_SERVICE_ACCOUNT_KEY: ${{ vars.FIREBASE_SERVICE_ACCOUNT_KEY_DEV }}
           PORTAL_PRINTS_BACKEND_API_URL: ${{ vars.PORTAL_PRINTIFY_API_URL_DEV}}
+          NEXT_PUBLIC_ONCHAINKIT_API_KEY: ${{ vars.NEXT_PUBLIC_ONCHAINKIT_API_KEY_DEV }}
+          NEXT_PUBLIC_USE_TESTNET: ${{ vars.NEXT_PUBLIC_USE_TESTNET_DEV }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL_DEV }}
+          NEXT_PUBLIC_CONTRACT_ADDRESS: ${{ vars.NEXT_PUBLIC_CONTRACT_ADDRESS_DEV }}
         run: |
           gcloud run deploy ${{ vars.PROJECT_CODE }}-dev-service --verbosity=none \
             --image ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPO_NAME }}/app-dev:${{ github.sha }} \
@@ -71,7 +75,10 @@ jobs:
             --region ${{ vars.GCP_LOCATION }} \
             --allow-unauthenticated \
             --project ${{ vars.GCP_PROJECT_ID }} \
-            --set-env-vars SHOPIFY_API_KEY="$SHOPIFY_API_KEY"
+            --set-env-vars NEXT_PUBLIC_ONCHAINKIT_API_KEY="$NEXT_PUBLIC_ONCHAINKIT_API_KEY" \
+            --set-env-vars NEXT_PUBLIC_USE_TESTNET="$NEXT_PUBLIC_USE_TESTNET" \
+            --set-env-vars NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" \
+            --set-env-vars NEXT_PUBLIC_CONTRACT_ADDRESS="$NEXT_PUBLIC_CONTRACT_ADDRESS"
             
 
   deploy-portal-printify-staging:
